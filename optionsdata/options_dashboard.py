@@ -136,20 +136,18 @@ TEMPLATE = """
 """
 
 # Function to get available expiry dates for a ticker
+# Only return dates that actually have valid options data
+
 def get_available_expiries(ticker):
+    import datetime
     try:
         tk = yf.Ticker(ticker)
-        
-        # Try multiple approaches to get expiry dates
+        # Try to get all possible expiry dates (from yfinance or fallback)
         expiries = None
-        
-        # Method 1: Direct access
         try:
             expiries = tk.options
         except Exception as e:
             print(f"Method 1 failed for {ticker}: {e}")
-        
-        # Method 2: Try with a small delay and retry
         if not expiries:
             import time
             time.sleep(1)
@@ -157,49 +155,24 @@ def get_available_expiries(ticker):
                 expiries = tk.options
             except Exception as e:
                 print(f"Method 2 failed for {ticker}: {e}")
-        
-        # Method 3: Try fetching options chain directly
         if not expiries:
+            expiries = get_fallback_expiries(ticker)
+        # Validate each expiry by checking if options data exists
+        valid_expiries = []
+        for date in expiries:
             try:
-                # Try to get the next few months of options
-                import datetime
-                today = datetime.date.today()
-                future_dates = []
-                for i in range(1, 13):  # Next 12 months
-                    future_date = today + datetime.timedelta(days=30*i)
-                    future_dates.append(future_date.strftime('%Y-%m-%d'))
-                
-                # Try to get options for these dates
-                for date in future_dates:
-                    try:
-                        opt_chain = tk.option_chain(date)
-                        if opt_chain.calls is not None and len(opt_chain.calls) > 0:
-                            if expiries is None:
-                                expiries = []
-                            expiries.append(date)
-                        if len(expiries) >= 6:  # Limit to 6 dates
-                            break
-                    except:
-                        continue
+                opt_chain = tk.option_chain(date)
+                if (hasattr(opt_chain, 'calls') and not opt_chain.calls.empty) or (hasattr(opt_chain, 'puts') and not opt_chain.puts.empty):
+                    valid_expiries.append(date)
             except Exception as e:
-                print(f"Method 3 failed for {ticker}: {e}")
-        
-        # Convert to list if it's a tuple
-        if isinstance(expiries, tuple):
-            expiries = list(expiries)
-        
-        if expiries:
-            # Sort and limit to 12 dates
-            expiries = sorted(expiries)
-            return expiries[:12]
-        
-        # If all methods fail, return some default dates for common tickers
-        print(f"All methods failed for {ticker}, using fallback dates")
-        return get_fallback_expiries(ticker)
-        
+                print(f"Expiry {date} for {ticker} is invalid: {e}")
+                continue
+        # Sort and limit to 12 dates
+        valid_expiries = sorted(valid_expiries)
+        return valid_expiries[:12]
     except Exception as e:
         print(f"Error getting expiries for {ticker}: {e}")
-        return get_fallback_expiries(ticker)
+        return []
 
 def get_fallback_expiries(ticker):
     """Provide fallback expiry dates when yfinance fails"""
