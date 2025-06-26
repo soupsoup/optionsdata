@@ -141,37 +141,46 @@ TEMPLATE = """
 def get_available_expiries(ticker):
     import datetime
     try:
+        print(f"[DEBUG] Fetching available expiries for ticker: {ticker}")
         tk = yf.Ticker(ticker)
-        # Try to get all possible expiry dates (from yfinance or fallback)
         expiries = None
         try:
             expiries = tk.options
+            print(f"[DEBUG] yfinance returned expiries: {expiries}")
         except Exception as e:
-            print(f"Method 1 failed for {ticker}: {e}")
+            print(f"[DEBUG] Method 1 failed for {ticker}: {e}")
         if not expiries:
             import time
             time.sleep(1)
             try:
                 expiries = tk.options
+                print(f"[DEBUG] Retry: yfinance returned expiries: {expiries}")
             except Exception as e:
-                print(f"Method 2 failed for {ticker}: {e}")
+                print(f"[DEBUG] Method 2 failed for {ticker}: {e}")
         if not expiries:
             expiries = get_fallback_expiries(ticker)
-        # Validate each expiry by checking if options data exists
+            print(f"[DEBUG] Using fallback expiries: {expiries}")
         valid_expiries = []
         for date in expiries:
             try:
+                print(f"[DEBUG] Checking expiry: {date}")
                 opt_chain = tk.option_chain(date)
-                if (hasattr(opt_chain, 'calls') and not opt_chain.calls.empty) or (hasattr(opt_chain, 'puts') and not opt_chain.puts.empty):
+                calls_valid = hasattr(opt_chain, 'calls') and not opt_chain.calls.empty
+                puts_valid = hasattr(opt_chain, 'puts') and not opt_chain.puts.empty
+                print(f"[DEBUG] Calls valid: {calls_valid}, Puts valid: {puts_valid}")
+                if calls_valid or puts_valid:
                     valid_expiries.append(date)
+                    print(f"[DEBUG] Valid expiry found: {date}")
+                else:
+                    print(f"[DEBUG] No valid options data for expiry: {date}")
             except Exception as e:
-                print(f"Expiry {date} for {ticker} is invalid: {e}")
+                print(f"[DEBUG] Expiry {date} for {ticker} is invalid: {e}")
                 continue
-        # Sort and limit to 12 dates
         valid_expiries = sorted(valid_expiries)
+        print(f"[DEBUG] Final valid expiries for {ticker}: {valid_expiries}")
         return valid_expiries[:12]
     except Exception as e:
-        print(f"Error getting expiries for {ticker}: {e}")
+        print(f"[DEBUG] Error getting expiries for {ticker}: {e}")
         return []
 
 def get_fallback_expiries(ticker):
@@ -219,21 +228,26 @@ def get_current_price(ticker):
 
 # Function to fetch and calculate options data
 def fetch_options_data(ticker, expiry, strike_min, strike_max):
+    print(f"[DEBUG] Fetching options data for {ticker} expiry {expiry} range {strike_min}-{strike_max}")
     tk = yf.Ticker(ticker)
     try:
         opt_chain = tk.option_chain(expiry)
         calls = opt_chain.calls
         puts = opt_chain.puts
+        print(f"[DEBUG] Calls shape: {calls.shape if hasattr(calls, 'shape') else 'N/A'}, Puts shape: {puts.shape if hasattr(puts, 'shape') else 'N/A'}")
     except Exception as e:
+        print(f"[DEBUG] Error fetching data for {ticker} {expiry}: {e}")
         return f"Error fetching data: {e}", None
 
     if calls.empty and puts.empty:
+        print(f"[DEBUG] No options data available for {ticker} on {expiry}")
         return f"No options data available for {ticker} on {expiry}", None
 
     df = pd.merge(calls, puts, on='strike', how='outer', suffixes=('_call', '_put'))
     df = df[(df['strike'] >= strike_min) & (df['strike'] <= strike_max)].copy()
 
     if df.empty:
+        print(f"[DEBUG] No options found in strike range {strike_min}-{strike_max} for {ticker}")
         return f"No options found in strike range {strike_min}-{strike_max} for {ticker}", None
 
     # Calculate percentages
@@ -247,6 +261,7 @@ def fetch_options_data(ticker, expiry, strike_min, strike_max):
     df.columns = ['Strike', 'Call Vol', 'Put Vol', 'Call Vol %', 'Put Vol %', 'Call OI', 'Put OI', 'Call OI %', 'Put OI %']
     
     df = df.round(1).fillna('-')
+    print(f"[DEBUG] Returning options data table for {ticker} {expiry}")
     return None, df.to_html(index=False, classes='table')
 
 # Function to generate heatmap image as base64
