@@ -51,4 +51,7 @@ instance/
 *.svg
 
 # Logs
-*.log 
+*.log
+
+# Railway
+!railway.json 
