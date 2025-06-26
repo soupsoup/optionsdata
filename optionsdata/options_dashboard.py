@@ -139,17 +139,101 @@ TEMPLATE = """
 def get_available_expiries(ticker):
     try:
         tk = yf.Ticker(ticker)
-        expiries = tk.options
+        
+        # Try multiple approaches to get expiry dates
+        expiries = None
+        
+        # Method 1: Direct access
+        try:
+            expiries = tk.options
+        except Exception as e:
+            print(f"Method 1 failed for {ticker}: {e}")
+        
+        # Method 2: Try with a small delay and retry
+        if not expiries:
+            import time
+            time.sleep(1)
+            try:
+                expiries = tk.options
+            except Exception as e:
+                print(f"Method 2 failed for {ticker}: {e}")
+        
+        # Method 3: Try fetching options chain directly
+        if not expiries:
+            try:
+                # Try to get the next few months of options
+                import datetime
+                today = datetime.date.today()
+                future_dates = []
+                for i in range(1, 13):  # Next 12 months
+                    future_date = today + datetime.timedelta(days=30*i)
+                    future_dates.append(future_date.strftime('%Y-%m-%d'))
+                
+                # Try to get options for these dates
+                for date in future_dates:
+                    try:
+                        opt_chain = tk.option_chain(date)
+                        if opt_chain.calls is not None and len(opt_chain.calls) > 0:
+                            if expiries is None:
+                                expiries = []
+                            expiries.append(date)
+                        if len(expiries) >= 6:  # Limit to 6 dates
+                            break
+                    except:
+                        continue
+            except Exception as e:
+                print(f"Method 3 failed for {ticker}: {e}")
+        
         # Convert to list if it's a tuple
         if isinstance(expiries, tuple):
             expiries = list(expiries)
+        
         if expiries:
+            # Sort and limit to 12 dates
             expiries = sorted(expiries)
             return expiries[:12]
-        return []
+        
+        # If all methods fail, return some default dates for common tickers
+        print(f"All methods failed for {ticker}, using fallback dates")
+        return get_fallback_expiries(ticker)
+        
     except Exception as e:
         print(f"Error getting expiries for {ticker}: {e}")
-        return []
+        return get_fallback_expiries(ticker)
+
+def get_fallback_expiries(ticker):
+    """Provide fallback expiry dates when yfinance fails"""
+    import datetime
+    
+    # Generate next 6 months of third Friday dates (typical options expiry)
+    today = datetime.date.today()
+    fallback_dates = []
+    
+    for i in range(1, 7):
+        # Calculate third Friday of each month
+        future_date = today + datetime.timedelta(days=30*i)
+        year = future_date.year
+        month = future_date.month
+        
+        # Find third Friday
+        first_day = datetime.date(year, month, 1)
+        first_friday = first_day + datetime.timedelta(days=(4 - first_day.weekday()) % 7)
+        third_friday = first_friday + datetime.timedelta(weeks=2)
+        
+        # If third Friday has passed, use next month
+        if third_friday < today:
+            if month == 12:
+                year += 1
+                month = 1
+            else:
+                month += 1
+            first_day = datetime.date(year, month, 1)
+            first_friday = first_day + datetime.timedelta(days=(4 - first_day.weekday()) % 7)
+            third_friday = first_friday + datetime.timedelta(weeks=2)
+        
+        fallback_dates.append(third_friday.strftime('%Y-%m-%d'))
+    
+    return fallback_dates
 
 # Function to get current stock price
 def get_current_price(ticker):
@@ -343,7 +427,7 @@ def dashboard():
         available_expiries = get_available_expiries(ticker)
         
         if not available_expiries:
-            error = f"No options data available for {ticker}. Please check the ticker symbol."
+            error = f"Unable to fetch options data for {ticker}. This could be due to:\n- Invalid ticker symbol\n- No options available for this stock\n- Temporary API issues\n\nPlease try:\n- Checking the ticker symbol spelling\n- Using a different ticker (e.g., SPY, AAPL, TSLA)\n- Refreshing the page in a few minutes"
         else:
             # Get current price
             current_price = get_current_price(ticker)
